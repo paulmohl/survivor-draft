@@ -379,7 +379,22 @@ async function trySync() {
     if (serverCount > 0) {
       let changed = false;
       for (const [k, v] of Object.entries(serverPicks)) {
-        // Resolve rank if missing (scraper couldn't match player name)
+        // Old server format: key is player name, not pick number
+        if (isNaN(parseInt(k, 10))) {
+          if (!v.name) v.name = k;
+          if (!v.rank) v.rank = resolveRank(v);
+          if (!v.rank) continue;
+          const already = Object.values(state.drafted).some(d => d.rank === v.rank);
+          if (!already) {
+            const used2 = Object.keys(state.drafted).map(Number).filter(n => n > 0);
+            let slot = used2.length ? Math.max(...used2) + 1 : 1;
+            while (state.drafted[slot]) slot++;
+            state.drafted[slot] = v;
+            changed = true;
+          }
+          continue;
+        }
+        // New server format: key is pick number
         if (!v.rank) v.rank = resolveRank(v);
         if (!state.drafted[k] || state.drafted[k].name !== v.name) {
           state.drafted[k] = v;
@@ -388,7 +403,6 @@ async function trySync() {
       }
       if (changed || serverCount !== _lastSyncCount) {
         _lastSyncCount = serverCount;
-        // Advance pick counter past highest known pick
         const used = Object.keys(state.drafted).map(Number).filter(n=>n>0);
         if (used.length) {
           let next = Math.max(...used) + 1;

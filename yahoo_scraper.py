@@ -16,7 +16,8 @@ except ImportError:
     raise
 
 LEAGUE_ID  = "728916"
-STATE_FILE = Path("draft_state.json")
+HERE       = Path(__file__).parent
+STATE_FILE = HERE / "draft_state.json"
 SERVER     = "http://localhost:5050"
 
 # ── Player index ──────────────────────────────────────
@@ -24,8 +25,8 @@ ALL_PLAYERS = []
 BY_NAME     = {}
 BY_KEY      = {}
 
-if Path("players.json").exists():
-    for p in json.loads(Path("players.json").read_text()):
+if (HERE / "players.json").exists():
+    for p in json.loads((HERE / "players.json").read_text()):
         ALL_PLAYERS.append(p)
         nl = p["name"].lower()
         BY_NAME[nl] = p
@@ -80,15 +81,23 @@ def flush():
 
 
 def post_server(entry: dict):
-    try:
-        data = json.dumps(entry).encode()
-        req = urllib.request.Request(
-            f"{SERVER}/api/draft_pick", data=data,
-            headers={"Content-Type": "application/json"}, method="POST"
-        )
-        urllib.request.urlopen(req, timeout=2)
-    except Exception:
-        pass
+    name = entry.get("name", "")
+    attempts = [
+        (f"{SERVER}/api/draft_pick", entry),
+        (f"{SERVER}/api/draft", {"pick": entry.get("pick"), "playerId": name, "by": entry.get("by", "Yahoo")}),
+    ]
+    for url, payload in attempts:
+        try:
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(url, data=data,
+                headers={"Content-Type": "application/json"}, method="POST")
+            urllib.request.urlopen(req, timeout=2)
+            return
+        except urllib.error.HTTPError as e:
+            if e.code == 405:
+                continue  # old server — try legacy endpoint
+        except Exception:
+            return
 
 
 def record(pick_num: int, name: str, team: str = "", pos: str = "", by: str = "Yahoo") -> bool:
