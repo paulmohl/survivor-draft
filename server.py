@@ -61,8 +61,10 @@ def save_state(s):
     STATE_FILE.write_text(json.dumps(s, indent=2))
 
 
+# In-memory state — merged with file on every /api/state request
 draft_state = load_state()
 token_data  = {}
+_state_lock = threading.Lock()
 
 
 # ─── STATIC ───────────────────────────────────────────
@@ -80,6 +82,12 @@ def static_files(path):
 
 @app.route("/api/state")
 def get_state():
+    # Always re-read from file so scraper writes are immediately visible
+    with _state_lock:
+        fresh = load_state()
+        # Merge in-memory picks (from OAuth sync) with file picks (from scraper)
+        fresh["drafted"].update(draft_state.get("drafted", {}))
+        draft_state.update(fresh)
     return jsonify(draft_state)
 
 @app.route("/api/draft", methods=["POST"])

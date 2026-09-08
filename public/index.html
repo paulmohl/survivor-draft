@@ -341,25 +341,50 @@ document.addEventListener('keydown', e=>{
   if (e.key==='ArrowLeft'&&!e.target.matches('input'))  { state.pick=Math.max(state.pick-1,1);    save(); renderPickInfo(); }
 });
 
+let _lastSyncCount = 0;
+
 async function trySync() {
   const st = document.getElementById('sync-status');
-  st.textContent = 'Syncing...';
   try {
-    const r = await fetch('/api/state',{signal:AbortSignal.timeout(3000)});
+    const r = await fetch('/api/state', {signal: AbortSignal.timeout(4000)});
+    if (!r.ok) throw new Error('bad status');
     const d = await r.json();
-    if (d.drafted && Object.keys(d.drafted).length) {
-      Object.assign(state.drafted, d.drafted);
-      const used = Object.keys(state.drafted).map(Number);
-      state.pick = used.length ? Math.max(...used)+1 : 1;
+    const serverPicks = d.drafted || {};
+    const serverCount = Object.keys(serverPicks).length;
+
+    if (serverCount > 0) {
+      // Merge server picks into local state (server wins on conflicts)
+      let newPicks = 0;
+      for (const [k, v] of Object.entries(serverPicks)) {
+        if (!state.drafted[k]) newPicks++;
+        state.drafted[k] = v;
+      }
+      // Advance pick counter to next open slot
+      const used = Object.keys(state.drafted).map(Number).filter(n=>n>0);
+      if (used.length) {
+        let next = Math.max(...used) + 1;
+        while (state.drafted[next]) next++;
+        state.pick = Math.min(next, TOTAL+1);
+      }
       save(); render();
-      st.textContent = `✓ ${Object.keys(d.drafted).length} picks synced`;
-    } else { st.textContent = 'No picks yet'; }
-  } catch(e) { st.textContent = 'Offline (standalone)'; }
-  setTimeout(()=>st.textContent='', 4000);
+
+      if (serverCount !== _lastSyncCount) {
+        _lastSyncCount = serverCount;
+        st.textContent = `✓ ${serverCount} picks (${newPicks} new)`;
+        setTimeout(()=>st.textContent='', 5000);
+      }
+    } else {
+      st.textContent = ''; // server up, no picks yet — silent
+    }
+  } catch(e) {
+    st.textContent = ''; // server offline — silent, standalone mode works
+  }
 }
 
 load(); render();
-setInterval(trySync, 30000);
+// Sync every 5s when server is running — picks show up within seconds of scraper writing
+setInterval(trySync, 5000);
+trySync(); // immediate on load
 </script>
 </body>
 </html>
