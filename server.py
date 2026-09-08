@@ -18,7 +18,7 @@ import requests
 
 load_dotenv()
 
-app = Flask(__name__, static_folder="public")
+app = Flask(__name__, static_folder=str(Path(__file__).parent / "public"))
 CORS(app)
 app.secret_key = os.getenv("FLASK_SECRET", "ff-draft-2026-secret")
 
@@ -30,12 +30,15 @@ AUTH_URL       = "https://api.login.yahoo.com/oauth2/request_auth"
 TOKEN_URL      = "https://api.login.yahoo.com/oauth2/get_token"
 YAHOO_API      = "https://fantasysports.yahooapis.com/fantasy/v2"
 
-STATE_FILE = Path("draft_state.json")
+# Always resolve relative to this script's directory, not CWD
+HERE       = Path(__file__).parent
+STATE_FILE = HERE / "draft_state.json"
 
 # Build name→rank lookup from players.json
 PLAYERS = {}
-if Path("players.json").exists():
-    for p in json.loads(Path("players.json").read_text()):
+_players_file = HERE / "players.json"
+if _players_file.exists():
+    for p in json.loads(_players_file.read_text()):
         PLAYERS[p["name"].lower()] = p
 
 def name_to_rank(full_name: str):
