@@ -82,13 +82,42 @@ def static_files(path):
 
 @app.route("/api/state")
 def get_state():
-    # Always re-read from file so scraper writes are immediately visible
     with _state_lock:
-        fresh = load_state()
-        # Merge in-memory picks (from OAuth sync) with file picks (from scraper)
-        fresh["drafted"].update(draft_state.get("drafted", {}))
-        draft_state.update(fresh)
+        # Merge file picks into in-memory state (catches scraper writes)
+        try:
+            file_state = load_state()
+            for k, v in file_state.get("drafted", {}).items():
+                if k not in draft_state["drafted"]:
+                    draft_state["drafted"][k] = v
+            if file_state.get("lastSync"):
+                draft_state["lastSync"] = file_state["lastSync"]
+        except Exception:
+            pass
     return jsonify(draft_state)
+
+
+@app.route("/api/draft_pick", methods=["POST"])
+def draft_pick_from_scraper():
+    """Called directly by yahoo_scraper.py — updates in-memory state instantly."""
+    data = request.json or {}
+    pick_num = str(data.get("pick", ""))
+    if not pick_num:
+        return jsonify({"error": "pick required"}), 400
+    with _state_lock:
+        draft_state["drafted"][pick_num] = {
+            "rank": data.get("rank"),
+            "name": data.get("name", ""),
+            "team": data.get("team", ""),
+            "pos":  data.get("pos", ""),
+            "by":   data.get("by", "Yahoo"),
+            "yahoo": True,
+            "at":   data.get("at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+        }
+        draft_state["lastSync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        draft_state["yahooConnected"] = True
+        save_state(draft_state)
+    print(f"[Pick] #{pick_num}: {data.get('name','')} ({data.get('pos','')})")
+    return jsonify({"ok": True, "total": len(draft_state["drafted"])})
 
 @app.route("/api/draft", methods=["POST"])
 def mark_drafted():

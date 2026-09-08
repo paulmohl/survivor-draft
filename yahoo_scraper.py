@@ -7,8 +7,10 @@ Usage:
   python yahoo_scraper.py
 """
 
-import asyncio, json, re, time
+import asyncio, json, re, time, urllib.request, urllib.error
 from pathlib import Path
+
+SERVER = "http://localhost:5050"
 
 try:
     from playwright.async_api import async_playwright
@@ -66,12 +68,28 @@ def load_state():
 state = load_state()
 
 
+def post_to_server(entry: dict):
+    """Push a single pick to the Flask server in-memory state immediately."""
+    try:
+        data = json.dumps(entry).encode()
+        req = urllib.request.Request(
+            f"{SERVER}/api/draft_pick",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass  # Server might not be running; file is the fallback
+
+
 def record(pick_num: int, name: str, team: str = "", pos: str = "", by: str = "Yahoo"):
     k = str(pick_num)
     if k in state["drafted"] and state["drafted"][k].get("name"):
         return False
     p = find_player(name)
-    state["drafted"][k] = {
+    entry = {
+        "pick":  pick_num,
         "rank":  p["rank"] if p else None,
         "name":  p["name"] if p else name,
         "team":  p.get("team", team) if p else team,
@@ -80,8 +98,9 @@ def record(pick_num: int, name: str, team: str = "", pos: str = "", by: str = "Y
         "yahoo": True,
         "at":    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    entry = state["drafted"][k]
+    state["drafted"][k] = entry
     print(f"  Pick #{pick_num:3d}: {entry['name']:<28} {entry['pos']:<4} {entry['team']}")
+    post_to_server(entry)  # push instantly to server memory
     return True
 
 

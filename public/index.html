@@ -382,8 +382,8 @@ async function trySync() {
 }
 
 load(); render();
-// Sync every 5s when server is running — picks show up within seconds of scraper writing
-setInterval(trySync, 5000);
+// Poll every 2s — picks show up almost instantly after scraper POSTs to server
+setInterval(trySync, 2000);
 trySync(); // immediate on load
 </script>
 </body>
