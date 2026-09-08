@@ -157,7 +157,7 @@ let state = { drafted: {}, pick: 1 };
 const save = () => localStorage.setItem('ff26', JSON.stringify(state));
 const load = () => { try { const s = JSON.parse(localStorage.getItem('ff26')||'null'); if(s) state=s; } catch(e){} };
 
-const isDrafted = r => Object.values(state.drafted).some(d => d.rank===r);
+const isDrafted = r => Object.values(state.drafted).some(d => d.rank===r || (d.rank==null && resolveRank(d)===r));
 const myTeam    = () => Object.entries(state.drafted)
   .filter(([k])=>MY_PICKS.includes(+k)).map(([k,d])=>({...d,pick:+k})).sort((a,b)=>a.pick-b.pick);
 
@@ -341,43 +341,67 @@ document.addEventListener('keydown', e=>{
   if (e.key==='ArrowLeft'&&!e.target.matches('input'))  { state.pick=Math.max(state.pick-1,1);    save(); renderPickInfo(); }
 });
 
+// Name→rank lookup for matching scraper picks that have null rank
+const BY_NAME_LOWER = {};
+PLAYERS.forEach(p => {
+  BY_NAME_LOWER[p.name.toLowerCase()] = p.rank;
+  // also index last name
+  const parts = p.name.toLowerCase().split(' ');
+  if (parts.length >= 2) {
+    const last = parts[parts.length-1].replace(/[.]/g,'');
+    if (!BY_NAME_LOWER[last]) BY_NAME_LOWER[last] = p.rank;
+  }
+});
+
+function resolveRank(entry) {
+  if (entry.rank) return entry.rank;
+  if (!entry.name) return null;
+  const nl = entry.name.toLowerCase().trim();
+  if (BY_NAME_LOWER[nl]) return BY_NAME_LOWER[nl];
+  // partial match
+  for (const [k, rank] of Object.entries(BY_NAME_LOWER)) {
+    if (k.length > 4 && nl.includes(k)) return rank;
+  }
+  return null;
+}
+
 let _lastSyncCount = 0;
 
 async function trySync() {
   const st = document.getElementById('sync-status');
   try {
-    const r = await fetch('/api/state', {signal: AbortSignal.timeout(4000)});
+    const r = await fetch('/api/state', {cache:'no-store', signal: AbortSignal.timeout(4000)});
     if (!r.ok) throw new Error('bad status');
     const d = await r.json();
     const serverPicks = d.drafted || {};
     const serverCount = Object.keys(serverPicks).length;
 
     if (serverCount > 0) {
-      // Merge server picks into local state (server wins on conflicts)
-      let newPicks = 0;
+      let changed = false;
       for (const [k, v] of Object.entries(serverPicks)) {
-        if (!state.drafted[k]) newPicks++;
-        state.drafted[k] = v;
+        // Resolve rank if missing (scraper couldn't match player name)
+        if (!v.rank) v.rank = resolveRank(v);
+        if (!state.drafted[k] || state.drafted[k].name !== v.name) {
+          state.drafted[k] = v;
+          changed = true;
+        }
       }
-      // Advance pick counter to next open slot
-      const used = Object.keys(state.drafted).map(Number).filter(n=>n>0);
-      if (used.length) {
-        let next = Math.max(...used) + 1;
-        while (state.drafted[next]) next++;
-        state.pick = Math.min(next, TOTAL+1);
-      }
-      save(); render();
-
-      if (serverCount !== _lastSyncCount) {
+      if (changed || serverCount !== _lastSyncCount) {
         _lastSyncCount = serverCount;
-        st.textContent = `✓ ${serverCount} picks (${newPicks} new)`;
-        setTimeout(()=>st.textContent='', 5000);
+        // Advance pick counter past highest known pick
+        const used = Object.keys(state.drafted).map(Number).filter(n=>n>0);
+        if (used.length) {
+          let next = Math.max(...used) + 1;
+          while (state.drafted[next]) next++;
+          state.pick = Math.min(next, TOTAL+1);
+        }
+        save(); render();
+        st.textContent = `✓ ${serverCount} picks synced`;
+        setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
       }
-    } else {
-      st.textContent = ''; // server up, no picks yet — silent
     }
   } catch(e) {
-    st.textContent = ''; // server offline — silent, standalone mode works
+    // server offline — standalone mode, no message needed
   }
 }
 

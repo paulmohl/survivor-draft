@@ -82,18 +82,17 @@ def static_files(path):
 
 @app.route("/api/state")
 def get_state():
+    # Read file fresh every time — scraper writes here, browser reads here
+    try:
+        data = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    except Exception:
+        data = {}
+    # Also include any in-memory picks not yet flushed to file
     with _state_lock:
-        # Merge file picks into in-memory state (catches scraper writes)
-        try:
-            file_state = load_state()
-            for k, v in file_state.get("drafted", {}).items():
-                if k not in draft_state["drafted"]:
-                    draft_state["drafted"][k] = v
-            if file_state.get("lastSync"):
-                draft_state["lastSync"] = file_state["lastSync"]
-        except Exception:
-            pass
-    return jsonify(draft_state)
+        for k, v in draft_state.get("drafted", {}).items():
+            if k not in data.get("drafted", {}):
+                data.setdefault("drafted", {})[k] = v
+    return jsonify(data)
 
 
 @app.route("/api/draft_pick", methods=["POST"])
